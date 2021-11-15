@@ -22,7 +22,7 @@ parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--n_glimpses', type=int, default=6)
 parser.add_argument('--patch_size', type=int, default=8)
 parser.add_argument('--n_patches', type=int, default=1)
-parser.add_argument('--scale', type=int, default=2)
+parser.add_argument('--scale', type=float, default=2)
 args = parser.parse_args()
 
 assert args.n_to_plot % args.n_rows == 0 
@@ -42,7 +42,6 @@ def sample_glimpses(model, iterator, num_glimpses, device='cpu'):
 
         x_0 = images.to(device)
         x_0 = torch.reshape(x_0, (x_0.shape[0], 1, x_0.shape[1], x_0.shape[2]))
-        x_1 = x_0
         batch_size = x_0.shape[0]
 
         l_t = torch.zeros([batch_size, 2], dtype=torch.float32).to(device)
@@ -52,9 +51,9 @@ def sample_glimpses(model, iterator, num_glimpses, device='cpu'):
         locations = []
         for t in range(num_glimpses):
             locations.append(l_t)
-            _, l_t, _, predicted, _, _, _, _ = model(x_0, x_1, l_t, h_state)
+            _, l_t, _, predicted, _, _, _ = model(x_0, l_t, h_state)
         
-        loc = torch.stack((locations[0], locations[1], locations[2], locations[3], locations[4]))
+        loc = torch.stack((locations[0], locations[1], locations[2], locations[3], locations[4], locations[5], locations[6], locations[7]))
 
         predictions = torch.argmax(predicted, dim=-1)
 

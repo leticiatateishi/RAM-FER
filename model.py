@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.distributions import Normal
-
+from skimage.transform import resize
 
 def weights_init_(m):
     if isinstance(m, nn.Linear):
@@ -58,8 +58,9 @@ class Retina:
 
         # resize the patches to squares of size patch_size
         for i in range(1, len(phi)):
-            k = phi[i].shape[-1] // self.patch_size
-            phi[i] = F.avg_pool2d(phi[i], k)
+            batch = [resize(phi[i][j][0], (self.patch_size, self.patch_size), anti_aliasing=True) for j in range(phi[0].shape[0])]
+            batch = np.array(batch)
+            phi[i] = torch.unsqueeze(torch.Tensor(batch),1)
 
         # concatenate into a single tensor and flatten
         phi = torch.stack(phi)
@@ -106,30 +107,28 @@ class GlimpseNetwork(nn.Module):
         self.retina = Retina(patch_size, num_patches, glimpse_scale)
         
         # Image layers
-        self.conv_1_1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
-        self.conv_1_2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.bn_1_1 = nn.BatchNorm2d(16)
-        self.bn_1_2 = nn.BatchNorm2d(32)
+        self.conv_1_1 = nn.Conv2d(1, 4, kernel_size=3, padding=1)
+        self.conv_1_2 = nn.Conv2d(4, 8, kernel_size=3, padding=1)
+        self.bn_1_1 = nn.BatchNorm2d(4)
+        self.bn_1_2 = nn.BatchNorm2d(8)
         
-        self.conv_2_1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
-        self.conv_2_2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.bn_2_1 = nn.BatchNorm2d(16)
-        self.bn_2_2 = nn.BatchNorm2d(32)
+        self.conv_2_1 = nn.Conv2d(1, 4, kernel_size=3, padding=1)
+        self.conv_2_2 = nn.Conv2d(4, 8, kernel_size=3, padding=1)
+        self.bn_2_1 = nn.BatchNorm2d(4)
+        self.bn_2_2 = nn.BatchNorm2d(8)
         
-        self.conv_3_1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
-        self.conv_3_2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.bn_3_1 = nn.BatchNorm2d(16)
-        self.bn_3_2 = nn.BatchNorm2d(32)
+        self.conv_3_1 = nn.Conv2d(1, 4, kernel_size=3, padding=1)
+        self.conv_3_2 = nn.Conv2d(4, 8, kernel_size=3, padding=1)
+        self.bn_3_1 = nn.BatchNorm2d(4)
+        self.bn_3_2 = nn.BatchNorm2d(8)
         
-        self.fc_x_1 = nn.Linear(512, 128)
-        self.fc_x_2 = nn.Linear(512, 64)
-        self.fc_x_3 = nn.Linear(512, 64)
+        self.fc_x_1 = nn.Linear(800, 128)
+        self.fc_x_2 = nn.Linear(800, 64)
+        self.fc_x_3 = nn.Linear(800, 64)
 
         # Location layers
         self.fc_l_1 = nn.Linear(2, 256)
         self.fc_l_2 = nn.Linear(256, 256)
-
-        self.drop = nn.Dropout(p=0.3)
 
     def forward(self, x, l_t):
         
@@ -141,32 +140,29 @@ class GlimpseNetwork(nn.Module):
                 
         # Use CNN in each glimpse scale
         x_1 = F.leaky_relu(self.bn_1_1(self.conv_1_1(x_1)), inplace=True)
-        x_1 = F.avg_pool2d(x_1, kernel_size=2, stride=2)
         x_1 = F.leaky_relu(self.bn_1_2(self.conv_1_2(x_1)), inplace=True) 
         x_1 = x_1.view(phi[0].shape[0], -1)
         
         x_2 = F.leaky_relu(self.bn_2_1(self.conv_2_1(x_2)), inplace=True)
-        x_2 = F.avg_pool2d(x_2, kernel_size=2, stride=2)
         x_2 = F.leaky_relu(self.bn_2_2(self.conv_2_2(x_2)), inplace=True) 
         x_2 = x_2.view(phi[1].shape[0], -1)
         
         x_3 = F.leaky_relu(self.bn_3_1(self.conv_3_1(x_3)), inplace=True)
-        x_3 = F.avg_pool2d(x_3, kernel_size=2, stride=2)
         x_3 = F.leaky_relu(self.bn_3_2(self.conv_3_2(x_3)), inplace=True) 
         x_3 = x_3.view(phi[2].shape[0], -1)
 
         # Process the cnn output
-        x_1 = self.drop(self.fc_x_1(x_1))
-        x_2 = self.drop(self.fc_x_2(x_2))
-        x_3 = self.drop(self.fc_x_3(x_3))
+        x_1 = self.fc_x_1(x_1)
+        x_2 = self.fc_x_2(x_2)
+        x_3 = self.fc_x_3(x_3)
         
         x_t = torch.cat([x_1, x_2, x_3], axis=1)
         
         # Flatten location vector
         l_t = l_t.view(l_t.size(0), -1)
         
-        l_t = F.relu(self.drop(self.fc_l_1(l_t)), inplace=True)
-        l_t = self.drop(self.fc_l_2(l_t))
+        l_t = F.relu(self.fc_l_1(l_t), inplace=True)
+        l_t = self.fc_l_2(l_t)
 
         # Concat the location and glimpses
         g_t = F.relu(x_t + l_t, inplace=True)
@@ -274,6 +270,3 @@ class BaselineNetwork(nn.Module):
         b_t = self.fc_3(b_t)
         
         return b_t
-    
-    
-    

@@ -23,9 +23,9 @@ class Main:
     def __init__(self):
         
         # Glimpse Network Params
-        self.num_glimpses = 5 # number of glimpses
-        self.patch_size = 8 # size of extracted patch at highest res
-        self.glimpse_scale = 2 # scale of successive patches
+        self.num_glimpses = 8 # number of glimpses
+        self.patch_size = 10 # size of extracted patch at highest res
+        self.glimpse_scale = 1.5 # scale of successive patches
         self.num_patches = 3 # number of downscaled patches per glimpse
         
         # Training params
@@ -36,16 +36,10 @@ class Main:
         self.start_epoch = 0
         self.lr_threshold = 0.01
         self.train_patience = 100 # Number of epochs to wait before stopping train
-        
-        # Data params
-        self.valid_size = 0.1 # Proportion of training set used for validation
-        self.test_size = 0.05 # Proportion of training set used for test
-        self.num_workers = 4 # number of subprocesses to use for data loading
 
         # Other params
         self.random_seed = 1 # Seed to ensure reproducibility
         self.best = True # Load best model or most recent for testing
-        self.print_freq = 10 # How frequently to print training details
         self.best_valid_acc = 0
         self.counter = 0
         
@@ -171,33 +165,31 @@ class Main:
             print(f"\nEpoch: {epoch+1}/{self.epochs} - LR: {current_lr}")
 
             # Train one epoch
-            train_acc, train_f1, train_reward, train_loss, train_rl, train_entropy, train_mae, train_data = self._train_one_epoch(epoch)
+            train_acc, train_f1, train_reward, train_loss, train_rl, train_entropy, train_data = self._train_one_epoch(epoch)
             train_losses.append(train_loss)
             train_accuracy.append(train_acc)
             train_rewards.append(train_reward)
 
             # Validate one epoch
-            val_acc, val_f1, val_reward, val_loss, val_rl, val_mae, val_data = self._validate(epoch)
+            val_acc, val_f1, val_reward, val_loss, val_rl, val_data = self._validate(epoch)
             val_losses.append(val_loss)
             val_accuracy.append(val_acc)
             val_rewards.append(val_reward)
 
             # Reduce lr if validation loss plateaus
-            self.scheduler.step(train_mae)
+            self.scheduler.step(val_loss)
 
             # Check if it is the best model
             is_best = val_acc > self.best_valid_acc
             
-            msg = "acc: {:.3f}%, f1: {:.3f}, loss: {:.3f}, mae: {:.3f}, rl: {:.3f}, H: {:.3f} | val_acc: {:.3f}%, val_f1: {:.3f}, val loss: {:.3f}, val mae: {:.3f}, val rl: {:.3f}"
+            msg = "acc: {:.3f}%, f1: {:.3f}, loss: {:.3f}, rl: {:.3f}, H: {:.3f} | val_acc: {:.3f}%, val_f1: {:.3f}, val loss: {:.3f}, val rl: {:.3f}"
             
             # Check for improvement
             if is_best:
                 msg += " [*]"
                 self.best_valid_acc = val_acc
             
-            print(msg.format(train_acc*100, train_f1, train_loss, train_mae, train_rl, train_entropy, val_acc*100, val_f1, val_loss, val_mae, val_rl))
-            
-            #self.best_valid_acc = min(val_mae, self.best_valid_acc)
+            print(msg.format(train_acc*100, train_f1, train_loss, train_rl, train_entropy, val_acc*100, val_f1, val_loss, val_rl))
             
             # Save the checkpoint for each epoch
             self._save_checkpoint({
@@ -223,14 +215,11 @@ class Main:
         losses = AverageMeter()
         rl_bar = AverageMeter()
         entropy_bar = AverageMeter()
-        mae_bar = AverageMeter()
         
         # Store the losses array
         loss_action_array = []
         loss_baseline_array = []
         loss_reinforce_array = []
-        mse_array = []
-        mae_array = []
         reward_array = []
         accuracy = []
         f1s = []
@@ -243,7 +232,6 @@ class Main:
             for i, (x, y) in enumerate(self.train_loader):
                                 
                 # Set data to the respected device
-                #x_0, x_1, y = x[:, 0].to(self.device), x[:, 1].to(self.device), y.to(self.device)
                 x, y = x.to(self.device), y.to(self.device)
                 x = torch.reshape(x, (x.shape[0], 1, x.shape[1], x.shape[2]))
                 labels = y
@@ -284,21 +272,17 @@ class Main:
                 predicted_denormalized = torch.stack([denormalize_displacement(l, 48) for l in predicted])
 
                 weight = torch.FloatTensor([7.1, 65.8, 7., 3.9, 5.9, 9., 5.7])
-                loss_cross = torch.nn.CrossEntropyLoss()
+                loss_cross = torch.nn.CrossEntropyLoss(weight=weight)
+                #loss_cross = torch.nn.CrossEntropyLoss()
                 loss_mse = torch.nn.MSELoss()
-                loss_l1 = torch.nn.L1Loss()
                                 
-                # Compute the reward based on L1 norm
-                #R = (1/(1 + torch.square(torch.sub(predicted_denormalized.detach(), y.detach())).mean(dim=1))) 
-                predictions = torch.argmax(predicted_denormalized, dim=-1)
-                R = (predictions.detach() == labels).float()
-                R = torch.Tensor([1. if item == 1. else -1. for item in R])
+                # Compute the reward based on L2 norm
+                R = (1/(1 + torch.square(torch.sub(predicted_denormalized.detach(), y.detach())).mean(dim=1))) 
                 
                 R_unsqueeze = R.unsqueeze(1).repeat(1, self.num_glimpses)
                     
                 # Compute losses for differentiable modules
                 loss_action = loss_cross(predicted_denormalized, labels.type(torch.LongTensor))
-                #loss_action = loss_mse(predicted_denormalized, y)
                 loss_baseline = loss_mse(baselines, R_unsqueeze)
 
                 # Compute reinforce loss, summed over timesteps and averaged across batch
@@ -308,24 +292,17 @@ class Main:
 
                 # Join the losses
                 loss = loss_action + loss_baseline + loss_reinforce
-
-                # Get the mse
-                mse = loss_action
-                mae = loss_l1(predicted_denormalized.detach(), y)
                 
                 # Store the losses
                 loss_action_array.append(loss_action.cpu().data.numpy())
                 loss_baseline_array.append(loss_baseline.cpu().data.numpy())
                 loss_reinforce_array.append(loss_reinforce.cpu().data.numpy())
-                mse_array.append(mse.cpu().data.numpy())
-                mae_array.append(mae.cpu().data.numpy())
                 reward_array.append(torch.mean(R).cpu().data.numpy())  
 
                 # Store the loss and metric
                 losses.update(loss.item(), x.size()[0])
                 rl_bar.update(loss_reinforce.item(), x.size()[0])
                 entropy_bar.update(entropy_pi.mean().item(), x.size()[0])
-                mae_bar.update(mae.item(), x.size()[0])
 
                 # Compute gradients and update SGD
                 self.optimizer.zero_grad()
@@ -336,6 +313,7 @@ class Main:
                 
                 self.optimizer.step()
 
+                predictions = torch.argmax(predicted_denormalized, dim=-1)
                 acc = balanced_accuracy_score(labels.cpu(), predictions.cpu())
                 f1 = f1_score(labels.cpu(), predictions.cpu(), average='weighted')
                 accuracy.append(acc)
@@ -347,7 +325,7 @@ class Main:
                 batch_time.update(toc - tic)
 
                 # Set the var description
-                pbar.set_description(("{:.1f}s - acc: {:.3f}%, f1: {:.3f}, loss: {:.3f}, mae: {:.3f}, rl: {:.3f}".format((toc-tic), acc*100, f1, loss.item(), mae.item(), loss_reinforce.item())))
+                pbar.set_description(("{:.1f}s - acc: {:.3f}%, f1: {:.3f}, loss: {:.3f}, rl: {:.3f}".format((toc-tic), acc*100, f1, loss.item(), loss_reinforce.item())))
                 
                 # Update the bar
                 pbar.update(self.batch_size)
@@ -385,7 +363,7 @@ class Main:
                         pickle.dump(torch.stack(glimpse_location), f)
                 
             # Build the train data array
-            train_data = (accuracy, f1s, mse_array, mae_array, reward_array, loss_action_array, loss_baseline_array, loss_reinforce_array)
+            train_data = (accuracy, f1s, reward_array, loss_action_array, loss_baseline_array, loss_reinforce_array)
 
             # Convert to numpy array
             train_data = map(np.asarray, train_data)
@@ -394,21 +372,18 @@ class Main:
             mean_f1 = sum(f1s) / float(len(f1s))
             mean_reward = sum(rewards) / float(len(rewards))
 
-        return mean_acc, mean_f1, mean_reward, losses.avg, rl_bar.avg, entropy_bar.avg, mae_bar.avg, train_data
+        return mean_acc, mean_f1, mean_reward, losses.avg, rl_bar.avg, entropy_bar.avg, train_data
 
     @torch.no_grad()
     def _validate(self, epoch):
   
         losses = AverageMeter()
         rl_bar = AverageMeter()
-        mae_bar = AverageMeter()
             
         # Store the losses array
         loss_action_array = []
         loss_baseline_array = []
         loss_reinforce_array = []
-        mse_array = []
-        mae_array = []
         reward_array = []
         accuracy = []
         f1s = []
@@ -456,21 +431,17 @@ class Main:
             predicted_denormalized = torch.stack([denormalize_displacement(l, 48) for l in predicted])
             
             loss_mse = torch.nn.MSELoss()
-            loss_l1 = torch.nn.L1Loss()
-            
-            # Compute the reward based on L1 norm
-            predictions = torch.argmax(predicted_denormalized, dim=-1)
-            R = (predictions.detach() == labels).float()
-            R = torch.Tensor([1. if item == 1. else -1. for item in R])
+        
+            # Compute the reward based on L2 norm
+            R = (1/(1 + torch.square(torch.sub(predicted_denormalized.detach(), y.detach())).mean(dim=1))) 
 
             R_unsqueeze = R.unsqueeze(1).repeat(1, self.num_glimpses)
                 
             # Compute losses for differentiable modules
             weight = torch.FloatTensor([7.1, 65.8, 7., 3.9, 5.9, 9., 5.7])
-            #loss_cross = torch.nn.CrossEntropyLoss(weight=weight)
-            loss_cross = torch.nn.CrossEntropyLoss()
+            loss_cross = torch.nn.CrossEntropyLoss(weight=weight)
+            #loss_cross = torch.nn.CrossEntropyLoss()
             loss_action = loss_cross(predicted_denormalized, labels.type(torch.LongTensor))
-            #loss_action = loss_mse(predicted_denormalized, y)
             loss_baseline = loss_mse(baselines, R_unsqueeze)
 
             # Compute reinforce loss, summed over timesteps and averaged across batch
@@ -480,10 +451,6 @@ class Main:
 
             # Join the losses
             loss = loss_action + loss_baseline + loss_reinforce
-
-            # Get the mse
-            mse = loss_action
-            mae = loss_l1(predicted_denormalized.detach(), y)
 
             predictions = torch.argmax(predicted_denormalized, dim=-1)
             acc = balanced_accuracy_score(labels.cpu(), predictions.cpu())
@@ -496,17 +463,14 @@ class Main:
             loss_action_array.append(loss_action.cpu().data.numpy())
             loss_baseline_array.append(loss_baseline.cpu().data.numpy())
             loss_reinforce_array.append(loss_reinforce.cpu().data.numpy())
-            mse_array.append(mse.cpu().data.numpy())
-            mae_array.append(mae.cpu().data.numpy())
             reward_array.append(torch.mean(R).cpu().data.numpy())  
 
             # Store the loss and metric
             losses.update(loss.item(), x.size()[0])
             rl_bar.update(loss_reinforce.item(), x.size()[0])
-            mae_bar.update(mae.item(), x.size()[0])
             
         # Build the validation data array
-        validation_data = (accuracy, f1s, mse_array, mae_array, reward_array, loss_action_array, loss_baseline_array, loss_reinforce_array)
+        validation_data = (accuracy, f1s, reward_array, loss_action_array, loss_baseline_array, loss_reinforce_array)
             
         # Convert to numpy array
         validation_data = map(np.asarray, validation_data)
@@ -515,7 +479,7 @@ class Main:
         mean_f1 = sum(f1s) / float(len(f1s))
         mean_reward = sum(rewards) / float(len(rewards))
 
-        return mean_acc, mean_f1, mean_reward, losses.avg, rl_bar.avg, mae_bar.avg, validation_data
+        return mean_acc, mean_f1, mean_reward, losses.avg, rl_bar.avg, validation_data
 
     @torch.no_grad()
     def test(self, model_name):
@@ -653,7 +617,7 @@ class Main:
         self.optimizer.load_state_dict(checkpoint["optim_state"])
 
         if best:
-            print(f"[*] Loaded {checkpoint_path} checkpoint @ epoch {self.start_epoch} with best valid mse of {self.best_valid_acc}")
+            print(f"[*] Loaded {checkpoint_path} checkpoint @ epoch {self.start_epoch} with best valid acc of {self.best_valid_acc}")
         else:
             print(f"[*] Loaded {checkpoint_path} checkpoint @ epoch {self.start_epoch}")
             
@@ -670,50 +634,11 @@ class Main:
         df['lr'] = [self.lr]
         df['num train'] = [self.num_train]
         df['num valid'] = [self.num_valid]
-        df['num test'] = [self.num_test]
         
         df = df.astype(str)
         
         # Render the table
         render_table(df, self.output_path, 'config.svg')
-        
-    def _save_results(self, mse_all, mae_all, samples, glimpses):
-    
-        df = pd.DataFrame()
-        df['MSE'] = [round(mse_all, 4)]
-        df['MAE'] = [round(mae_all, 4)]
-        df = df.astype(str)
-        
-        print(df)
-        
-        # Save the table
-        render_table(df, self.output_path, 'metrics.svg')
-        
-        predictions = []
-        ground_truth = []
-        mae = []
-        
-        for e in samples:
-            
-            q = list(map(lambda x: round(x, 2), e[0]))
-            p = list(map(lambda x: round(x, 2), e[1]))
-            
-            predictions.append(p)
-            ground_truth.append(q)
-            
-            # Compute the mae for each prediction
-            mae.append(round(abs(p[0]-q[0]) + abs(p[1]-q[1]), 2))
-        
-        df = pd.DataFrame()
-        df['Predicted'] = predictions
-        df['Ground-truth'] = ground_truth
-        df['MAE'] = list(map(lambda x: "%.3f" % x, mae))
-        df = df.astype(str)
-        
-        print(df)
-        
-        # Save the table
-        render_table(df, self.output_path, 'predictions.svg', col_width=3)
                 
         
 def parse_arguments():

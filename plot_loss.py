@@ -27,8 +27,6 @@ def main(data_dir, minibatch, save):
     
     train_acc_array = []
     train_f1_array = []
-    train_mse_array = []
-    train_mae_array = []
     train_reward_array = []
     train_loss_action_array = []
     train_loss_baseline_array = []
@@ -37,8 +35,6 @@ def main(data_dir, minibatch, save):
     
     val_acc_array = []
     val_f1_array = []
-    val_mse_array = []
-    val_mae_array = []
     val_reward_array = []
     val_loss_action_array = []
     val_loss_baseline_array = []
@@ -62,21 +58,19 @@ def main(data_dir, minibatch, save):
         
         if np.shape(train_loss)[0] == 7:
         # Unpack the losses
-            train_acc, train_f1, train_mse, train_mae, train_reward, train_loss_action, train_loss_baseline, train_loss_reinforce, _ = train_loss
-            val_acc, val_f1, val_mse, val_mae, val_reward, val_loss_action, val_loss_baseline, val_loss_reinforce, _ = val_loss
+            train_acc, train_f1, train_reward, train_loss_action, train_loss_baseline, train_loss_reinforce, _ = train_loss
+            val_acc, val_f1, val_reward, val_loss_action, val_loss_baseline, val_loss_reinforce, _ = val_loss
         else:
-            train_acc, train_f1, train_mse, train_mae, train_reward, train_loss_action, train_loss_baseline, train_loss_reinforce = train_loss
-            val_acc, val_f1, val_mse, val_mae, val_reward, val_loss_action, val_loss_baseline, val_loss_reinforce = val_loss
+            train_acc, train_f1, train_reward, train_loss_action, train_loss_baseline, train_loss_reinforce = train_loss
+            val_acc, val_f1, val_reward, val_loss_action, val_loss_baseline, val_loss_reinforce = val_loss
 
         if interations_train is None:
-            interations_train = len(train_mse)
-            interations_val = len(val_mse)
+            interations_train = len(train_acc)
+            interations_val = len(val_acc)
             
         if not minibatch:
             train_acc = np.array(train_acc.sum()/interations_train)
             train_f1 = np.array(train_f1.sum()/interations_train)
-            train_mse = np.array(train_mse.sum()/interations_train)
-            train_mae = np.array(train_mae.sum()/interations_train)
             train_reward = np.array(train_reward.sum()/interations_train)
             train_loss_action = np.array(train_loss_action.sum()/interations_train)
             train_loss_baseline = np.array(train_loss_baseline.sum()/interations_train)
@@ -84,8 +78,6 @@ def main(data_dir, minibatch, save):
 
             val_acc = np.array(val_acc.sum()/interations_val)
             val_f1 = np.array(val_f1.sum()/interations_val)
-            val_mse = np.array(val_mse.sum()/interations_val)
-            val_mae = np.array(val_mae.sum()/interations_val)
             val_reward = np.array(val_reward.sum()/interations_val)
             val_loss_action = np.array(val_loss_action.sum()/interations_val)
             val_loss_baseline = np.array(val_loss_baseline.sum()/interations_val)
@@ -94,8 +86,6 @@ def main(data_dir, minibatch, save):
         # Concat the losses for all epochs for train
         train_acc_array = np.concatenate((train_acc_array, train_acc), axis=None)
         train_f1_array = np.concatenate((train_f1_array, train_f1), axis=None)
-        train_mse_array = np.concatenate((train_mse_array, train_mse), axis=None)
-        train_mae_array = np.concatenate((train_mae_array, train_mae), axis=None)
         train_reward_array = np.concatenate((train_reward_array, train_reward), axis=None)
         train_loss_action_array = np.concatenate((train_loss_action_array, train_loss_action), axis=None)
         train_loss_baseline_array = np.concatenate((train_loss_baseline_array, train_loss_baseline), axis=None)
@@ -107,8 +97,6 @@ def main(data_dir, minibatch, save):
         # Concat the losses for all epochs for validation
         val_acc_array = np.concatenate((val_acc_array, val_acc), axis=None)
         val_f1_array = np.concatenate((val_f1_array, val_f1), axis=None)
-        val_mse_array = np.concatenate((val_mse_array, val_mse), axis=None)
-        val_mae_array = np.concatenate((val_mae_array, val_mae), axis=None)
         val_reward_array = np.concatenate((val_reward_array, val_reward), axis=None)
         val_loss_action_array = np.concatenate((val_loss_action_array, val_loss_action), axis=None)
         val_loss_baseline_array = np.concatenate((val_loss_baseline_array, val_loss_baseline), axis=None)
@@ -118,8 +106,6 @@ def main(data_dir, minibatch, save):
     
     acc_array = [train_acc_array, val_acc_array]
     f1_array = [train_f1_array, val_f1_array]
-    mse_array = [train_mse_array, val_mse_array]
-    mae_array = [train_mae_array, val_mae_array]
     reward_array = [train_reward_array, val_reward_array]
     loss_action_array = [train_loss_action_array, val_loss_action_array]
     loss_baseline_array = [train_loss_baseline_array, val_loss_baseline_array]
@@ -130,8 +116,6 @@ def main(data_dir, minibatch, save):
     plot_order_array = [
         acc_array,
         f1_array,
-        mse_array,
-        mae_array, 
         reward_array, 
         loss_action_array,
         loss_baseline_array,
@@ -140,9 +124,9 @@ def main(data_dir, minibatch, save):
     ]
     
     # Define the subplots titles
-    titles = ['Accuracy', 'F1 Score', 'MSE', 'MAE', 'Reward', 'Classification Loss',
+    titles = ['Accuracy', 'F1 Score', 'Reward', 'Classification Loss',
               'Baseline Loss (MSE)', 'Reinforce Loss', 'All Losses']
-    names = ['acc', 'f1', 'mse', 'mae', 'reward', 'classification_loss',
+    names = ['acc', 'f1', 'reward', 'classification_loss',
              'baseline_loss', 'reinforce_loss', 'losses']
 
     type_loss = 'Minibatch' if minibatch else 'Epoch'
